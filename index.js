@@ -27,65 +27,55 @@ async function searchInternet(query) {
   } catch (e) { return null }
 }
 
-// 🧠 ඔයාගේ Key එකට වැඩ කරන Model එක Auto හොයනවා
-let CACHED_MODEL = null
-async function getWorkingModel() {
-  if (CACHED_MODEL) return CACHED_MODEL
+// 🧠 ඔයාගේ Key එකට තියෙන හැම Model එකම ගන්නවා
+async function getAllModels() {
   try {
     const res = await axios.get(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_KEY}`, { timeout: 10000 })
-    const models = res.data.models || []
-    console.log('📋 Available Models:', models.map(m => m.name).join(', '))
-    // Gemini 4 එකට Priority දෙනවා
-    const g4 = models.find(m => m.name.includes('gemini-4') && m.supportedGenerationMethods?.includes('generateContent'))
-    const flash = models.find(m => m.name.includes('flash') && m.supportedGenerationMethods?.includes('generateContent'))
-    const anyModel = models.find(m => m.supportedGenerationMethods?.includes('generateContent'))
-    const picked = g4 || flash || anyModel
-    if (picked) {
-      CACHED_MODEL = picked.name.replace('models/', '')
-      console.log(`✅ Auto Picked Model: ${CACHED_MODEL}`)
-      return CACHED_MODEL
-    }
+    const models = (res.data.models || [])
+      .filter(m => m.supportedGenerationMethods?.includes('generateContent'))
+      .map(m => m.name.replace('models/', ''))
+    console.log('📋 Available Models:', models.join(', '))
+    // Priority Order - Quota තියෙන ඒවා මුලින්
+    const priority = ['gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash-lite', 'gemini-omni-1.1-flash', 'gemini-omni-1.2-flash']
+    const sorted = []
+    for (let p of priority) if (models.includes(p)) sorted.push(p)
+    for (let m of models) if (!sorted.includes(m) && !m.includes('argon') && !m.includes('neon') && !m.includes('carbon') && !m.includes('pro') && !m.includes('transcribe') && !m.includes('tts') && !m.includes('image')) sorted.push(m)
+    return sorted
   } catch (e) {
-    console.log('Model List Error:', e.response?.data?.error?.message || e.message)
+    console.log('Model List Error:', e.message)
+    return ['gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-3.7-flash']
   }
-  // List එක ගන්න බැරි වුනොත් මේවා Try කරනවා
-  return 'gemini-4-hydrogen'
 }
 
-// 🧠 GEMINI AI - Gemini 4 එක්ක
+// 🧠 GEMINI AI - Quota Aware Fallback
 async function askAI(userMsg) {
   const needInternet = /අද|මිල|price|latest|news|කීයද|2026|2025|weather|score|result|කවුද|who is|what is/i.test(userMsg)
   let searchData = null
-  if (needInternet) {
-    searchData = await searchInternet(userMsg)
-  }
+  if (needInternet) searchData = await searchInternet(userMsg)
 
   let prompt = `ඔයා HANSAKA MD. HANSAKA හදපු AI Bot එකක්. A/L IT කරන කොල්ලෙක්ගේ හොඳම යාළුවා වගේ කතා කරන්න. සිංහල + English මිශ්‍ර කරලා, fun විදියට, Emoticon දාලා, කෙටියෙන් පැහැදිලිව උත්තර දෙන්න. Owner: HANSAKA.\n\nUser: ${userMsg}`
-  
-  if (searchData) {
-    prompt += `\n\nINTERNET SEARCH RESULT (මේක පදනම් කරගෙන උත්තර දෙන්න):\n${searchData}`
-  }
+  if (searchData) prompt += `\n\nINTERNET SEARCH RESULT (මේක පදනම් කරගෙන උත්තර දෙන්න):\n${searchData}`
 
-  const model = await getWorkingModel()
-  const tryModels = [model, 'gemini-4-hydrogen', 'gemini-4-neon', 'gemini-2.5-flash', 'gemini-2.0-flash']
+  const models = await getAllModels()
 
-  for (let m of [...new Set(tryModels)]) {
+  for (let m of models) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${GEMINI_KEY}`
       const res = await axios.post(url, {
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.7, maxOutputTokens: 1000 }
-      }, { headers: { 'Content-Type': 'application/json' }, timeout: 15000 })
+        generationConfig: { temperature: 0.7, maxOutputTokens: 800 }
+      }, { headers: { 'Content-Type': 'application/json' }, timeout: 20000 })
       
       console.log(`✅ Working Model: ${m}`)
-      CACHED_MODEL = m
       return res.data.candidates[0].content.parts[0].text
     } catch (e) {
-      console.log(`❌ Fail Model ${m}:`, e.response?.data?.error?.message || e.message)
+      const msg = e.response?.data?.error?.message || e.message
+      console.log(`❌ Fail Model ${m}:`, msg.slice(0, 120))
+      // Quota / High Demand නම් ඊලඟ එකට යනවා, නවතින්නේ නෑ
       continue
     }
   }
-  return 'අඩෝ Gemini එකට ටිකක් අවුල් වුනා මචං 😅 Log එකේ Available Models කියලා තියෙන එක Screenshot කරලා එවපන්!'
+  return 'අඩෝ මචං දැන් Gemini Free Quota එක ඉවරයි 😅 විනාඩි 1-2කින් ආයෙත් Message එකක් දාන්න, නැත්තම් අලුත් API Key එකක් දාන්න ඕනි! 🔥'
 }
 
 // 🔥 ALIVE - Gemini 4 Version
@@ -120,14 +110,9 @@ async function sendAlive(chatId, userName) {
 ╰───〔 DEPLOYED BY HANSAKA 〕───╯`
 
   try {
-    if (fs.existsSync('alive.jpg')) {
-      await bot.sendPhoto(chatId, 'alive.jpg', { caption: caption })
-    } else {
-      await bot.sendMessage(chatId, caption)
-    }
-  } catch (e) { 
-    await bot.sendMessage(chatId, caption) 
-  }
+    if (fs.existsSync('alive.jpg')) await bot.sendPhoto(chatId, 'alive.jpg', { caption: caption })
+    else await bot.sendMessage(chatId, caption)
+  } catch (e) { await bot.sendMessage(chatId, caption) }
 }
 
 bot.onText(/\/start/, (msg) => sendAlive(msg.chat.id, msg.from.first_name || 'User'))

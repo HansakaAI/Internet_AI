@@ -3,59 +3,71 @@ import axios from 'axios'
 import fs from 'fs'
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN
-const GEMINI_KEY = process.env.GEMINI_API_KEY
+// Key 3ක් - එකක් ඉවර වුනොත් අනිත් එකෙන් යනවා!
+const KEYS = [process.env.GEMINI_API_KEY, process.env.GEMINI_API_KEY2, process.env.GEMINI_API_KEY3].filter(Boolean)
+let keyIndex = 0
+function getKey() {
+  const k = KEYS[keyIndex % KEYS.length]
+  keyIndex++
+  return k
+}
 
 const bot = new TelegramBot(TOKEN, { 
   polling: { interval: 500, autoStart: true, params: { timeout: 10 } } 
 })
-console.log('✅ HANSAKA MD - Gemini 4 Fast Connected! 🔥')
+console.log(`✅ HANSAKA MD - ${KEYS.length} Keys Loaded! 🔥`)
 
-// ⚡ SPEED FIX: වැඩ කරන Model එක මතක තියාගන්නවා, ආයෙත් හොයන්නේ නෑ!
-let CACHED_MODEL = 'gemini-4-hydrogen'
-let MODEL_FOUND = false
+// ⚡ වැඩ කරන Model එක මතක තියාගන්නවා
+let CACHED_MODEL = 'gemini-3.8-flash'
 
-// 🔍 INTERNET SEARCH - අවශ්‍ය වෙලාවට විතරක්
 async function searchInternet(query) {
   try {
     const res = await axios.get(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`, { timeout: 3000 }).catch(() => null)
-    if (res?.data?.AbstractText) return res.data.AbstractText
-    if (res?.data?.RelatedTopics?.[0]?.Text) return res.data.RelatedTopics[0].Text
-    return null
+    return res?.data?.AbstractText || res?.data?.RelatedTopics?.[0]?.Text || null
   } catch (e) { return null }
 }
 
-// 🧠 GEMINI AI - FAST
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
+
 async function askAI(userMsg) {
-  // Internet ඕනිද කියලා බලන්නේ මේ Words තිබ්බොත් විතරයි - නැත්තම් Skip!
-  const needInternet = /මිල|price|latest|news|කීයද|weather|score|result|අද.*වෙලද|2026.*මිල/i.test(userMsg)
+  const needInternet = /මිල|price|latest|news|කීයද|weather|score|result/i.test(userMsg)
   let searchData = null
   if (needInternet) searchData = await searchInternet(userMsg)
 
-  // Prompt එක කෙටි කරා - Token අඩුයි = Speed වැඩියි!
   let prompt = `ඔයා HANSAKA MD, HANSAKA ගේ යාළුවා. සිංහල+English මිශ්‍රව, fun විදියට, කෙටියෙන් උත්තර දෙන්න.\nUser: ${userMsg}`
   if (searchData) prompt += `\nSearch: ${searchData}`
 
-  // 1. මුලින්ම මතක තියෙන Model එකෙන්ම Try කරනවා - මේක තමයි Fastම!
-  const tryModels = [CACHED_MODEL, 'gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-omni-1.1-flash']
+  // Hydrogen High Demand නිසා 3.8 Flash එක මුලින්ම Try කරනවා - මේක Fast + Quota වැඩියි!
+  const tryModels = [CACHED_MODEL, 'gemini-3.8-flash', 'gemini-4-hydrogen', 'gemini-3.7-flash', 'gemini-omni-1.1-flash']
 
   for (let m of [...new Set(tryModels)]) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${GEMINI_KEY}`
-      const res = await axios.post(url, {
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.7, maxOutputTokens: 500 } // 1000 -> 500 කරා, 2x Speed!
-      }, { headers: { 'Content-Type': 'application/json' }, timeout: 8000 }) // 20s -> 8s කරා!
-      
-      console.log(`✅ Working Model: ${m}`)
-      CACHED_MODEL = m // වැඩ කරපු එක මතක තියාගන්නවා, ඊලඟ පාර ඒකෙන්ම යනවා!
-      MODEL_FOUND = true
-      return res.data.candidates[0].content.parts[0].text
-    } catch (e) {
-      console.log(`❌ Fail ${m}:`, (e.response?.data?.error?.message || e.message).slice(0, 80))
-      continue
+    for (let attempt = 0; attempt < KEYS.length; attempt++) {
+      const KEY = getKey()
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${KEY}`
+        const res = await axios.post(url, {
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.7, maxOutputTokens: 500 }
+        }, { headers: { 'Content-Type': 'application/json' }, timeout: 10000 })
+        
+        console.log(`✅ Working: ${m} | Key ${attempt+1}`)
+        CACHED_MODEL = m
+        return res.data.candidates[0].content.parts[0].text
+      } catch (e) {
+        const msg = e.response?.data?.error?.message || e.message
+        console.log(`❌ Fail ${m} Key${attempt+1}:`, msg.slice(0, 90))
+        // 429 / Quota නම් තත්පර 2ක් ඉඳලා අනිත් Key එක Try කරනවා
+        if (msg.includes('429') || msg.includes('Quota') || msg.includes('exceeded') || msg.includes('high demand')) {
+          await sleep(2000)
+          continue
+        }
+        break
+      }
     }
   }
-  return 'අඩෝ ටිකක් Slow වුනා මචං 😅 ආයෙත් දාන්න!'
+  // AI ඔක්කොම Fail වුනොත්, Internet එකෙන් හරි උත්තරයක් දෙනවා - හිස් Message එකක් එන්නේ නෑ!
+  if (searchData) return `මේක Internet එකෙන් හොයාගත්තේ මචං 👇\n\n${searchData}\n\n(Gemini ටිකක් Busy නිසා මේ විදියට දුන්නේ 😅)`
+  return 'අඩෝ දැන් ටිකක් Busy මචං 😅 විනාඩි 1කින් ආයෙත් දාන්න, එතකොට හරි යනවා!'
 }
 
 // 🔥 ALIVE
@@ -77,7 +89,7 @@ async function sendAlive(chatId, userName) {
 │  │  📆 Day      : ${day}
 │  │  🤖 Bot      : HANSAKA MD
 │  │  👑 Owner    : HANSAKA
-│  │  🧠 AI       : Gemini 4 Hydrogen 🟢
+│  │  🧠 AI       : Gemini 4 + 3.8 🟢
 │  │  🌐 Internet : ONLINE 🟢
 │  │  📱 Platform : ANDROID
 │  │  ⚡ Speed    : Super Fast 2.5x
@@ -100,7 +112,7 @@ bot.onText(/^\.alive/, (msg) => sendAlive(msg.chat.id, msg.from.first_name || 'U
 bot.onText(/\/alive/, (msg) => sendAlive(msg.chat.id, msg.from.first_name || 'User'))
 
 bot.onText(/\/help/, (msg) => {
-  bot.sendMessage(msg.chat.id, `🤖 *HANSAKA MD - Gemini 4 AI Bot*\n\n/start - Alive\n/alive - Status\n/help - මේක\n\nඕනම දෙයක් අහන්න! 🔥`)
+  bot.sendMessage(msg.chat.id, `🤖 *HANSAKA MD - Gemini AI Bot*\n\n/start - Alive\n/alive - Status\n/help - මේක\n\nඕනම දෙයක් අහන්න! 🔥`)
 })
 
 bot.on('message', async (msg) => {

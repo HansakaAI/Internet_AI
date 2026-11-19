@@ -4,7 +4,7 @@ import fs from 'fs'
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const GEMINI_KEY = process.env.GEMINI_API_KEY
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`
 
 const bot = new TelegramBot(TOKEN, { 
   polling: { interval: 1000, autoStart: true, params: { timeout: 10 } } 

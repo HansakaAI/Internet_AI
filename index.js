@@ -4,7 +4,9 @@ import fs from 'fs'
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const GEMINI_KEY = process.env.GEMINI_API_KEY
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`
+
+// Model 3ක් - එකක් Fail වුනොත් අනිත් එකට යනවා!
+const MODELS = ['gemini-3.0-flash', 'gemini-2.5-flash-lite', 'gemini-1.5-flash']
 
 const bot = new TelegramBot(TOKEN, { 
   polling: { interval: 1000, autoStart: true, params: { timeout: 10 } } 
@@ -28,7 +30,7 @@ async function searchInternet(query) {
   } catch (e) { return null }
 }
 
-// 🧠 GEMINI AI
+// 🧠 GEMINI AI - Auto Fallback එක්ක
 async function askAI(userMsg) {
   const needInternet = /අද|මිල|price|latest|news|කීයද|2026|2025|weather|score|result|කවුද|who is|what is/i.test(userMsg)
   let searchData = null
@@ -42,29 +44,65 @@ async function askAI(userMsg) {
     prompt += `\n\nINTERNET SEARCH RESULT (මේක පදනම් කරගෙන උත්තර දෙන්න):\n${searchData}`
   }
 
-  try {
-    const res = await axios.post(GEMINI_URL, {
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.7, maxOutputTokens: 1000 }
-    }, { headers: { 'Content-Type': 'application/json' }, timeout: 15000 })
-    
-    return res.data.candidates[0].content.parts[0].text
-  } catch (e) {
-    console.log('Gemini Error:', e.response?.data?.error?.message || e.message)
-    return 'අඩෝ Gemini එකට ටිකක් අවුල් වුනා මචං 😅 API Key එක හරිද කියලා බලලා ආයෙත් Message එකක් දාන්න!'
+  // Model එකින් එක Try කරනවා
+  for (let model of MODELS) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`
+      const res = await axios.post(url, {
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.7, maxOutputTokens: 1000 }
+      }, { headers: { 'Content-Type': 'application/json' }, timeout: 15000 })
+      
+      console.log(`✅ Working Model: ${model}`)
+      return res.data.candidates[0].content.parts[0].text
+    } catch (e) {
+      console.log(`❌ Fail Model ${model}:`, e.response?.data?.error?.message || e.message)
+      continue // ඊලඟ Model එක Try කරනවා
+    }
   }
+  return 'අඩෝ Gemini එකට ටිකක් අවුල් වුනා මචං 😅 ආයෙත් Message එකක් දාන්න!'
 }
 
-// 🔥 ALIVE
+// 🔥 ALIVE - ලස්සනට හදපු Version එක
 async function sendAlive(chatId, userName) {
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Colombo' }))
   const time = now.toLocaleTimeString('en-LK', { hour: '2-digit', minute: '2-digit', hour12: true })
   const date = now.toLocaleDateString('en-LK', { year: 'numeric', month: 'long', day: 'numeric' })
-  const caption = `⭐ Hey , ${userName}\n👋 welcome to HANSAKA MD 🦊\n┌ 「 STATUS PANEL 」\n│ 🕒 Time : ${time}\n│ 📅 Date : ${date}\n│ 🤖 Bot Name: HANSAKA MD\n│ 👑 Owner : HANSAKA\n│ 🧠 AI: Google Gemini 2.0 🟢\n│ 🌐 Internet: ON\n│ 📱 Platform: ANDROID\n└\n🫶 කොහොමද ඔයාලට HANSAKA MD BOT වෙත සාදරයෙන් පිළිගන්නවා... 🧡\n\nDEPLOYED BY HANSAKA`
+  const day = now.toLocaleDateString('en-LK', { weekday: 'long' })
+
+  const caption = `╭───〔 🦊 HANSAKA MD 〕───╮
+│
+│  👋 Hey, ${userName} !
+│  Welcome To HANSAKA MD Bot
+│
+│  ┌───〔 STATUS PANEL 〕───┐
+│  │
+│  │  🕒 Time     : ${time}
+│  │  📅 Date     : ${date}
+│  │  📆 Day      : ${day}
+│  │  🤖 Bot      : HANSAKA MD
+│  │  👑 Owner    : HANSAKA
+│  │  🧠 AI       : Gemini 3.0 🟢
+│  │  🌐 Internet : ONLINE 🟢
+│  │  📱 Platform : ANDROID
+│  │  ⚡ Speed    : Super Fast
+│  │
+│  └───〔 ─────────── 〕───┘
+│
+│  🫶 ඔයාලට HANSAKA MD BOT වෙත
+│  සාදරයෙන් පිළිගන්නවා... 🧡
+│
+╰───〔 DEPLOYED BY HANSAKA 〕───╯`
+
   try {
-    if (fs.existsSync('alive.jpg')) await bot.sendPhoto(chatId, 'alive.jpg', { caption: caption })
-    else await bot.sendMessage(chatId, caption)
-  } catch (e) { await bot.sendMessage(chatId, caption) }
+    if (fs.existsSync('alive.jpg')) {
+      await bot.sendPhoto(chatId, 'alive.jpg', { caption: caption })
+    } else {
+      await bot.sendMessage(chatId, caption)
+    }
+  } catch (e) { 
+    await bot.sendMessage(chatId, caption) 
+  }
 }
 
 bot.onText(/\/start/, (msg) => sendAlive(msg.chat.id, msg.from.first_name || 'User'))

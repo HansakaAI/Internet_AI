@@ -3,18 +3,23 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    paths:
+      - 'index.js'
+      - 'package.json'
+      - '.github/workflows/main.yml'
 concurrency:
   group: hansaka-bot
-  cancel-in-progress: true
+  cancel-in-progress: false   # running video downloads cut නොවෙන්න
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 330
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
       - run: npm install
       - name: Run Bot
         env:
@@ -22,4 +27,4 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
-          timeout 340m node index.js || true
+          timeout 320m node index.js || true

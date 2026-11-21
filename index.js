@@ -35,12 +35,52 @@ async function askGroq(userMsg, searchData) {
     console.log('✅ Working: Groq Llama-3.3')
     return res.data.choices[0].message.content
   } catch (e) {
+    console.log('❌ Groq Fail:', (e.response?.data?.error?.message |සම්පූර්ණ final `index.js` එක — quality menu (HD/SD/WM/MP3), retry + fallback, resolution probe සියල්ල එකට:
+
+```js
+import TelegramBot from 'node-telegram-bot-api'
+import axios from 'axios'
+import fs from 'fs'
+
+const TOKEN = process.env.TELEGRAM_BOT_TOKEN
+const GEMINI_KEY = process.env.GEMINI_API_KEY
+const GROQ_KEY = process.env.GROQ_API_KEY
+
+const bot = new TelegramBot(TOKEN, {
+  polling: { interval: 500, autoStart: true, params: { timeout: 10 } }
+})
+console.log('✅ HANSAKA MD - Groq + Gemini Connected! 🔥')
+
+// ================== 🔍 INTERNET SEARCH ==================
+async function searchInternet(query) {
+  try {
+    const res = await axios.get(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`, { timeout: 3000 }).catch(() => null)
+    return res?.data?.AbstractText || res?.data?.RelatedTopics?.[0]?.Text || null
+  } catch (e) { return null }
+}
+
+// ================== ⚡ GROQ (Main AI) ==================
+async function askGroq(userMsg, searchData) {
+  if (!GROQ_KEY) return null
+  try {
+    const res = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: 'ඔයා HANSAKA MD, HANSAKA ගේ යාළුවා. සිංහල+English මිශ්‍රව, fun විදියට, කෙටියෙන් උත්තර දෙන්න. Owner: HANSAKA.' },
+        { role: 'user', content: userMsg + (searchData ? `\nSearch: ${searchData}` : '') }
+      ],
+      temperature: 0.7,
+      max_tokens: 500
+    }, { headers: { 'Authorization': `Bearer ${GROQ_KEY}`, 'Content-Type': 'application/json' }, timeout: 15000 })
+    console.log('✅ Working: Groq Llama-3.3')
+    return res.data.choices[0].message.content
+  } catch (e) {
     console.log('❌ Groq Fail:', (e.response?.data?.error?.message || e.message).slice(0, 100))
     return null
   }
 }
 
-// 🧠 2. GEMINI - Backup
+// ================== 🧠 GEMINI (Backup) ==================
 async function askGemini(userMsg, searchData) {
   if (!GEMINI_KEY) return null
   const models = ['gemini-3.8-flash', 'gemini-4-hydrogen', 'gemini-3.7-flash']
@@ -60,7 +100,7 @@ async function askGemini(userMsg, searchData) {
   return null
 }
 
-// 🌐 3. POLLINATIONS - Key නැතුව වැඩ කරන Free AI (Last Resort)
+// ================== 🌐 POLLINATIONS (Last Resort) ==================
 async function askPollinations(userMsg) {
   try {
     const res = await axios.get(`https://text.pollinations.ai/${encodeURIComponent('You are HANSAKA MD, answer in Sinhala+English mix, fun and short. User: ' + userMsg)}`, { timeout: 20000 })
@@ -72,7 +112,7 @@ async function askPollinations(userMsg) {
   }
 }
 
-// 🧠 MAIN - 3න් එකක් හරි වැඩ කරනවා!
+// ================== 🧠 MAIN AI ==================
 async function askAI(userMsg) {
   const needInternet = /මිල|price|latest|news|කීයද|weather|score|result/i.test(userMsg)
   let searchData = null
@@ -91,7 +131,7 @@ async function askAI(userMsg) {
   return 'අඩෝ ටිකක් Busy මචං 😅 විනාඩි 1කින් ආයෙත් දාන්න!'
 }
 
-// 🔥 ALIVE
+// ================== 🔥 ALIVE ==================
 async function sendAlive(chatId, userName) {
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Colombo' }))
   const time = now.toLocaleTimeString('en-LK', { hour: '2-digit', minute: '2-digit', hour12: true })
@@ -137,7 +177,7 @@ bot.onText(/\/help/, (msg) => {
   bot.sendMessage(msg.chat.id, `🤖 *HANSAKA MD - Commands*\n\n/start - Alive\n/alive - Status\n/help - මේක\n\n🎵 *.tt <tiktok link>* - Video quality select කරලා download\n🎧 *.tta <tiktok link>* - MP3 only\n\nTikTok link එකක් command නැතුව එව්වත් quality menu එක එනවා!\n\nඕනම දෙයක් අහන්න! 🔥`, { parse_mode: 'Markdown' })
 })
 
-// ================= 🎵 TIKTOK DOWNLOADER =================
+// ================== 🎵 TIKTOK DOWNLOADER ==================
 const TIKWM_API = 'https://tikwm.com/api/'
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 const TIKTOK_URL_RE = /(https?:\/\/)?(?:www\.|vm\.|vt\.|m\.)?tiktok\.com\/[^\s]+/i
@@ -150,6 +190,8 @@ const queueTask = (fn) => {
   ttQueue = p.catch(() => {})
   return p
 }
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
 function fixUrl(u) {
   if (!u) return null
@@ -166,16 +208,40 @@ function extractTikTokUrl(text = '') {
   return url
 }
 
-async function tikwmFetch(tiktokUrl) {
-  const { data } = await axios.get(TIKWM_API, {
-    params: { url: tiktokUrl, hd: 1 },
+// 🔄 Retry + Fallback fetch (GitHub Actions datacenter IPs වලට tikwm slow/block වෙන නිසා)
+async function tikwmOnce(baseUrl, tiktokUrl, params) {
+  const { data } = await axios.get(baseUrl, {
+    params: { url: tiktokUrl, ...params },
     headers: { 'User-Agent': UA, Accept: 'application/json' },
-    timeout: 30000
+    timeout: 60000
   })
   if (!data || data.code !== 0 || !data.data) {
-    throw new Error(data?.msg || 'Video එක හොයාගන්න බැරි වුනා (private/deleted?)')
+    throw new Error(data?.msg || 'Video එක හොයාගන්න බැරි වුනා')
   }
   return data.data
+}
+
+async function tikwmFetch(tiktokUrl) {
+  const attempts = [
+    { base: 'https://tikwm.com/api/', params: { hd: 1 } },
+    { base: 'https://www.tikwm.com/api/', params: { hd: 1 } },
+    { base: 'https://tikwm.com/api/', params: {} }
+  ]
+  let lastErr
+  for (let i = 0; i < 3; i++) {
+    for (const a of attempts) {
+      try {
+        return await tikwmOnce(a.base, tiktokUrl, a.params)
+      } catch (e) {
+        const msg = e.message || ''
+        if (!/timeout|network|ECONN|403|429|5\d\d/i.test(msg)) throw e
+        lastErr = e
+        console.log(`🔁 TikWM retry (${a.base}):`, msg.slice(0, 80))
+      }
+    }
+    await sleep(3000 * (i + 1))
+  }
+  throw lastErr || new Error('TikTok API එකට connect වෙන්න බැරි වුනා')
 }
 
 async function toBuffer(url, maxMB = TG_LIMIT / 1024 / 1024) {
@@ -188,7 +254,7 @@ async function toBuffer(url, maxMB = TG_LIMIT / 1024 / 1024) {
   return Buffer.from(res.data)
 }
 
-// 🔍 Actual resolution eka video stream eken read karanawa (moov box / sdxo)
+// 🔍 Actual resolution read (mp4 avc1/hvc1 box eken)
 async function probeResolution(url) {
   try {
     const res = await axios.get(url, {
@@ -200,7 +266,6 @@ async function probeResolution(url) {
       let buf = Buffer.alloc(0)
       res.data.on('data', (c) => {
         buf = Buffer.concat([buf, c])
-        // 'avc1' / 'hvc1' sample entry eken width/height (offset +24/+26)
         const idx = buf.indexOf(Buffer.from('avc1')) !== -1 ? buf.indexOf(Buffer.from('avc1')) : buf.indexOf(Buffer.from('hvc1'))
         if (idx !== -1 && buf.length >= idx + 28) {
           const w = buf.readUInt16BE(idx + 24)
@@ -228,7 +293,7 @@ function labelForRes(w, h) {
 }
 
 // 🎯 Quality menu - inline keyboard
-const PENDING = new Map() // chatId -> tikwm data (5 min cache)
+const PENDING = new Map()
 
 async function sendQualityMenu(chatId, tiktokUrl) {
   const status = await bot.sendMessage(chatId, '⏳ TikTok info ගේනවා මචං...')
@@ -240,24 +305,20 @@ async function sendQualityMenu(chatId, tiktokUrl) {
     if (!hd && !sd && !wm) throw new Error('Download links හමුවුනේ නෑ')
 
     const rows = []
-    // HD / SD buttons
     if (hd) {
-      const hdLabel = (d.hd_size || 0) > 0 ? `🟣 HD Max${d.hd_size >= 50*1024*1024 ? ' ⚠️>50MB' : ''}` : '🟣 HD Max'
+      const hdLabel = (d.hd_size || 0) > 50 * 1024 * 1024 ? `🟣 HD Max ⚠️>50MB` : '🟣 HD Max (4K/2K/1080p)'
       rows.push([{ text: hdLabel, callback_data: `ttq|hd|${chatId}` }])
     }
-    if (sd) rows.push([{ text: `🔵 720p SD${d.size >= 50*1024*1024 ? ' ⚠️>50MB' : ''}`, callback_data: `ttq|sd|${chatId}` }])
+    if (sd) rows.push([{ text: `🔵 720p SD${d.size >= 50 * 1024 * 1024 ? ' ⚠️>50MB' : ''}`, callback_data: `ttq|sd|${chatId}` }])
     if (wm) rows.push([{ text: '💧 Watermark', callback_data: `ttq|wm|${chatId}` }])
-    rows.push([
-      { text: '🎧 MP3 Audio', callback_data: `ttq|audio|${chatId}` }
-    ])
+    rows.push([{ text: '🎧 MP3 Audio', callback_data: `ttq|audio|${chatId}` }])
 
-    const caption = `🎵 ${title.slice(0, 150)}\n👤 @${author}${d.duration ? `\n⏱ ${d.duration}s` : ''}\n\n📊 Quality select කරන්න:\n(TikTok එකේ 4K upload එකක් නම් HD Max = 4K/2K, නැත්නම් 1080p/720p)`
+    const caption = `🎵 ${title.slice(0, 150)}\n👤 @${author}${d.duration ? `\n⏱ ${d.duration}s` : ''}\n\n📊 Quality select කරන්න:\n(TikTok upload එක 4K/2K නම් HD Max = ඒ quality, නැත්නම් 1080p/720p)`
     await bot.editMessageText(caption, {
       chat_id: chatId, message_id: status.message_id,
       reply_markup: { inline_keyboard: rows }
     })
     PENDING.set(chatId, { d, ts: Date.now() })
-    // Old pending data clear
     for (const [k, v] of PENDING) if (Date.now() - v.ts > 5 * 60 * 1000) PENDING.delete(k)
   } catch (e) {
     await bot.editMessageText(`❌ Fail: ${e.message.slice(0, 150)}`, { chat_id: chatId, message_id: status.message_id }).catch(() => {})
@@ -297,12 +358,9 @@ bot.on('callback_query', async (q) => {
 
   const status = await bot.sendMessage(chatId, '🎬 Video ගේනවා...')
   try {
-    // Actual resolution probe (if under size limit)
     let resLabel = ''
-    if (wantUrl) {
-      const r = await probeResolution(wantUrl)
-      if (r) resLabel = `\n📐 Resolution: ${r.w}x${r.h} (${labelForRes(r.w, r.h)})`
-    }
+    const r = await probeResolution(wantUrl)
+    if (r) resLabel = `\n📐 Resolution: ${r.w}x${r.h} (${labelForRes(r.w, r.h)})`
     const opts = { caption: `🎵 ${(d.title || 'TikTok Video').slice(0, 200)}\n👤 @${d.author?.unique_id || 'unknown'}${resLabel}`, supports_streaming: true }
 
     let sent = false
@@ -325,7 +383,6 @@ bot.on('callback_query', async (q) => {
 
 async function tiktokHandle(chatId, tiktokUrl, wantAudio = false) {
   if (wantAudio) {
-    // Direct audio path
     const status = await bot.sendMessage(chatId, '⏳ TikTok info ගේනවා...')
     try {
       const d = await tikwmFetch(tiktokUrl)
@@ -360,7 +417,6 @@ bot.onText(/^[./](tt|tiktok|td|tta|ttmp3|tiktokmp3)(?:@\w+)?\s*(.*)$/i, (msg, ma
 
 bot.on('message', async (msg) => {
   if (!msg.text) return
-  // 🔗 TikTok link auto-detect
   const autoTt = extractTikTokUrl(msg.text)
   if (autoTt && !/^[./]/.test(msg.text)) {
     return queueTask(() => tiktokHandle(msg.chat.id, autoTt, /mp3|audio/i.test(msg.text)))
